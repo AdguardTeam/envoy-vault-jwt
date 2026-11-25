@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  artifact:
+    name: artifact ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Check for infrastructure values and key material
+        run: scripts/audit-values.sh
+
+      # The artifact stage copies the unit and e2e results, so a release asset is
+      # only built when both test stages passed.
+      - name: Build the module
+        run: |
+          docker buildx build \
+            --target artifact \
+            --cache-from type=gha,scope=e2e \
+            --output type=local,dest=dist \
+            .
+
+      - name: Name and checksum
+        run: |
+          set -eux
+          asset="libvault_jwt-linux-${{ matrix.arch }}.so"
+          mv dist/libvault_jwt.so "dist/${asset}"
+          cd dist
+          sha256sum "${asset}" > "${asset}.sha256"
+          cat "${asset}.sha256"
+
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/libvault_jwt-linux-${{ matrix.arch }}.so
+            dist/libvault_jwt-linux-${{ matrix.arch }}.so.sha256

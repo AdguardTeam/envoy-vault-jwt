@@ -1,0 +1,73 @@
+# Minimal configuration for `envoy --mode validate` in the compatibility build
+# stage. It loads libvault_jwt.so and parses the filter and per-route
+# configuration. The cluster is never contacted, and no certificate or token
+# file is needed. All values are fictional.
+
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+static_resources:
+  listeners:
+  - name: validate
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8181 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: validate
+          route_config:
+            name: validate
+            virtual_hosts:
+            - name: validate
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: vault }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "/var/run/secrets/vault/token",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api"
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+  - name: vault
+    type: STATIC
+    connect_timeout: 1s
+    load_assignment:
+      cluster_name: vault
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: 127.0.0.1, port_value: 8200 }

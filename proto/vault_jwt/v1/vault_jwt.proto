@@ -1,0 +1,145 @@
+// Configuration contract for the envoy.filters.http.dynamic_modules/vault_jwt
+// Envoy HTTP filter.
+//
+// Envoy cannot resolve a custom google.protobuf.Any type URL, so the runtime
+// form is the proto3 JSON encoding of FilterConfig carried in a
+// google.protobuf.StringValue. Field names follow proto3 JSON (camelCase); the
+// module also accepts the snake_case names, but not both for one field. Unknown
+// keys are rejected.
+//
+// Example:
+//
+//   filter_config:
+//     "@type": type.googleapis.com/google.protobuf.StringValue
+//     value: |
+//       {
+//         "vaultCluster": "vault",
+//         "vaultAuthority": "vault.example.com:8200",
+//         "authMount": "kubernetes",
+//         "authRole": "payments-workload",
+//         "tokenRole": "payments-machine",
+//         "kubernetesTokenPath": "/var/run/secrets/vault/token",
+//         "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+//         "expectedAudience": "payments-api"
+//       }
+//
+// src/config.cc implements the reader; keep the two in sync.
+
+syntax = "proto3";
+
+package vault_jwt.v1;
+
+// FilterConfig holds every value the filter trusts. No request header, route
+// header, or downstream peer can override a value from this message.
+message FilterConfig {
+  // Name of an Envoy cluster that reaches Vault over HTTPS. The socket address,
+  // TLS SNI, trusted CA, and protocol live in the cluster definition, not here.
+  //
+  // Example cluster (the CA file and certificate contents are deployment
+  // values and are not part of this project):
+  //
+  //   name: vault
+  //   type: STATIC
+  //   connect_timeout: 1s
+  //   load_assignment:
+  //     cluster_name: vault
+  //     endpoints:
+  //     - lb_endpoints:
+  //       - endpoint:
+  //           address:
+  //             socket_address: { address: 127.0.0.1, port_value: 8200 }
+  //   transport_socket:
+  //     name: envoy.transport_sockets.tls
+  //     typed_config:
+  //       "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+  //       sni: vault.example.com
+  //       common_tls_context:
+  //         validation_context:
+  //           trusted_ca:
+  //             filename: /etc/envoy/vault-ca.pem
+  //           match_typed_subject_alt_names:
+  //           - san_type: DNS
+  //             matcher: { exact: "vault.example.com" }
+  string vault_cluster = 1;
+
+  // Value of the :authority header on Vault requests, for example
+  // "vault.example.com:8200". It must match the certificate identity and the
+  // cluster's SNI.
+  string vault_authority = 2;
+
+  // Mount path of the Vault JWT auth method, for example "kubernetes".
+  // Nested mounts such as "team-a/kubernetes" are allowed.
+  string auth_mount = 3;
+
+  // Role name for the JWT auth login.
+  string auth_role = 4;
+
+  // Role name for the Vault Identity Token endpoint under
+  // /v1/identity/oidc/token/.
+  string token_role = 5;
+
+  // Absolute path of the projected Kubernetes ServiceAccount token. The file is
+  // opened on every authentication, so atomic symlink replacement by kubelet is
+  // visible without a restart.
+  string kubernetes_token_path = 6;
+
+  // Exact value of the machine token's "iss" claim.
+  string expected_issuer = 7;
+
+  // Audience that the machine token's "aud" claim must contain.
+  string expected_audience = 8;
+
+  // Optional additional top-level string claims that the machine token must
+  // carry with exactly these values. Reserved standard claims are rejected.
+  map<string, string> expected_claims = 9;
+
+  // Request header that carries the machine token. Must be a lowercase HTTP
+  // token of at most 64 characters, must not be a pseudo-header, must not be
+  // authorization, and must not be a framing header. Default "x-machine-token".
+  //
+  // On a protected route the filter removes this header and any
+  // "x-machine-token" that differs from it, then sets exactly one value under
+  // this name.
+  string header_name = 10;
+
+  // Refresh the machine token asynchronously once it has this many seconds
+  // left. The current token keeps serving until the refresh succeeds.
+  // Default 60. Must be greater than min_remaining_seconds.
+  uint32 refresh_margin_seconds = 11;
+
+  // Never inject a token with this much life or less. Default 30.
+  uint32 min_remaining_seconds = 12;
+
+  // Reject a token whose total lifetime exceeds this value. 0 disables the
+  // check. Default 0.
+  uint32 max_token_lifetime_seconds = 13;
+
+  // Allowed clock skew for iat and nbf. Default 60.
+  uint32 clock_skew_seconds = 14;
+
+  // Timeout of one Vault HTTP request. Default 2000.
+  uint32 request_timeout_ms = 15;
+
+  // Backoff after a failed acquisition. Default 200.
+  uint32 retry_initial_backoff_ms = 16;
+
+  // Backoff ceiling. Default 5000.
+  uint32 retry_max_backoff_ms = 17;
+
+  // Maximum number of requests that may wait for one acquisition, across all
+  // workers. Requests above the limit are rejected with 503. Default 128.
+  uint32 max_pending_requests = 18;
+
+  // Maximum size of the projected token file. Default 65536.
+  uint32 max_kubernetes_token_bytes = 19;
+
+  // Maximum size of one Vault response body. Default 65536.
+  uint32 max_vault_response_bytes = 20;
+}
+
+// PerRouteConfig is the typed_per_filter_config for
+// envoy.filters.http.dynamic_modules/vault_jwt. Injection is off unless a route
+// sets enabled to true.
+message PerRouteConfig {
+  bool enabled = 1;
+}

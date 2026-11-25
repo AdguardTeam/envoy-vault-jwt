@@ -1,0 +1,49 @@
+# Example Pod with a projected ServiceAccount token. Every name and identity is
+# fictional. Build the image from this repository and tag it
+# `envoy-vault-jwt:local`, or replace the image with your own Envoy image that
+# contains libvault_jwt.so.
+#
+# The audience must match the bound audience of the Vault JWT auth role. kubelet
+# replaces the token before it expires, and the module reopens the path on the
+# next reauthentication.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: envoy-vault-jwt-example
+  namespace: example
+spec:
+  serviceAccountName: envoy-vault-jwt-example
+  containers:
+  - name: envoy
+    image: envoy-vault-jwt:local
+    args:
+    - -c
+    - /etc/envoy/envoy.yaml
+    - --disable-hot-restart
+    env:
+    - name: ENVOY_DYNAMIC_MODULES_SEARCH_PATH
+      value: /usr/local/lib/envoy-vault-jwt
+    volumeMounts:
+    - name: vault-token
+      mountPath: /var/run/secrets/vault
+      readOnly: true
+    - name: envoy-config
+      mountPath: /etc/envoy
+      readOnly: true
+  volumes:
+  - name: vault-token
+    projected:
+      sources:
+      - serviceAccountToken:
+          path: token
+          audience: vault.example.com
+          expirationSeconds: 3600
+  - name: envoy-config
+    configMap:
+      name: envoy-vault-jwt-example
+      items:
+      - key: envoy.yaml
+        path: envoy.yaml
+      - key: vault-ca.pem
+        path: certs/vault-ca.pem

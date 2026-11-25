@@ -1,0 +1,594 @@
+# End-to-end test configuration. All hosts, paths, roles, and identities are
+# fictional. The test script replaces __CERT_DIR__ and __TOKEN_PATH__ before it
+# starts Envoy. Each listener owns one dynamic module filter config, so each
+# listener has its own credential cache.
+
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+static_resources:
+  listeners:
+  - name: main
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8181 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: main
+          use_remote_address: false
+          route_config:
+            name: main
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+            - name: reports
+              domains: ["reports.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: reports_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+            - name: open
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: custom_header
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8182 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: custom_header
+          use_remote_address: false
+          route_config:
+            name: custom_header
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-example-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: strict_issuer
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8183 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: strict_issuer
+          use_remote_address: false
+          route_config:
+            name: strict_issuer
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://other.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: strict_audience
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8184 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: strict_audience
+          use_remote_address: false
+          route_config:
+            name: strict_audience
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "other-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: pending
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8185 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: pending
+          use_remote_address: false
+          route_config:
+            name: pending
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 5000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 2,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: untrusted
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8186 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: untrusted
+          use_remote_address: false
+          route_config:
+            name: untrusted
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault_untrusted",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: short
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8187 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: short
+          use_remote_address: false
+          route_config:
+            name: short
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 4,
+                    "minRemainingSeconds": 2,
+                    "maxTokenLifetimeSeconds": 0,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: max_lifetime
+    address:
+      socket_address: { address: 127.0.0.1, port_value: 8189 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: max_lifetime
+          use_remote_address: false
+          route_config:
+            name: max_lifetime
+            virtual_hosts:
+            - name: app
+              domains: ["app.example.com"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app_upstream, timeout: 0s }
+                typed_per_filter_config:
+                  envoy.filters.http.dynamic_modules/vault_jwt:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+                    filter_name: vault_jwt
+                    dynamic_module_config: { name: vault_jwt }
+                    filter_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                      value: |
+                        {"enabled": true}
+          http_filters:
+          - name: envoy.filters.http.dynamic_modules/vault_jwt
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              filter_name: vault_jwt
+              dynamic_module_config:
+                name: vault_jwt
+                metrics_namespace: vault_jwt
+              filter_config:
+                "@type": type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  {
+                    "vaultCluster": "vault",
+                    "vaultAuthority": "vault.example.com:8200",
+                    "authMount": "kubernetes",
+                    "authRole": "payments-workload",
+                    "tokenRole": "payments-machine",
+                    "kubernetesTokenPath": "__TOKEN_PATH__",
+                    "expectedIssuer": "https://vault.example.com/v1/identity/oidc",
+                    "expectedAudience": "payments-api",
+                    "headerName": "x-machine-token",
+                    "refreshMarginSeconds": 60,
+                    "minRemainingSeconds": 30,
+                    "maxTokenLifetimeSeconds": 1200,
+                    "requestTimeoutMs": 2000,
+                    "retryInitialBackoffMs": 100,
+                    "retryMaxBackoffMs": 1000,
+                    "maxPendingRequests": 128,
+                    "maxKubernetesTokenBytes": 65536,
+                    "maxVaultResponseBytes": 65536
+                  }
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+  - name: vault
+    type: STATIC
+    connect_timeout: 1s
+    load_assignment:
+      cluster_name: vault
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: 127.0.0.1, port_value: 8200 }
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: vault.example.com
+        common_tls_context:
+          validation_context:
+            trusted_ca:
+              filename: __CERT_DIR__/ca.crt
+            match_typed_subject_alt_names:
+            - san_type: DNS
+              matcher: { exact: "vault.example.com" }
+
+  - name: vault_untrusted
+    type: STATIC
+    connect_timeout: 1s
+    load_assignment:
+      cluster_name: vault_untrusted
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: 127.0.0.1, port_value: 8200 }
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: vault.example.com
+        common_tls_context:
+          validation_context:
+            trusted_ca:
+              filename: __CERT_DIR__/other-ca.crt
+            match_typed_subject_alt_names:
+            - san_type: DNS
+              matcher: { exact: "vault.example.com" }
+
+  - name: app_upstream
+    type: STATIC
+    connect_timeout: 5s
+    load_assignment:
+      cluster_name: app_upstream
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: 127.0.0.1, port_value: 8080 }
+
+  - name: reports_upstream
+    type: STATIC
+    connect_timeout: 5s
+    load_assignment:
+      cluster_name: reports_upstream
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: 127.0.0.1, port_value: 8081 }

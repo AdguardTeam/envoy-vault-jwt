@@ -1,0 +1,6 @@
+dist/
+__pycache__/
+*.pyc
+tests/integration/certs/
+.DS_Store
+.tmp/
