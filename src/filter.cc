@@ -236,8 +236,12 @@ private:
       requests_.erase(id);
       return false;
     }
-    raw->set_reset([self = shared_from_this(), id]() {
-      self->scheduler_->schedule([self, id]() { self->handle_->resetHttpStream(id); });
+    // resetHttpStream() takes the host-assigned stream handle from the start
+    // result, not the module-local request id used as the map key.
+    const uint64_t stream_id = result.second;
+    raw->set_reset([self = shared_from_this(), stream_id]() {
+      self->scheduler_->schedule(
+          [self, stream_id]() { self->handle_->resetHttpStream(stream_id); });
     });
     return true;
   }

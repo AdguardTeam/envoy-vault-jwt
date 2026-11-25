@@ -72,7 +72,19 @@ RUN set -eux; \
       exit 1; \
     fi; \
     cat /test/result; \
-    grep -q "ALL TESTS PASSED" /test/result
+    grep -q "ALL TESTS PASSED" /test/result; \
+    $CXX $CXXFLAGS -Wall -Wextra -Werror -Itests/unit/fake_sdk \
+      tests/unit/test_stream_reset.cc src/json.cc src/config.cc src/jwt_claims.cc \
+      src/kubernetes_token.cc src/vault_api.cc src/coordinator.cc \
+      src/machine_token.cc src/exchange.cc \
+      -o /test/stream_reset_tests; \
+    if ! ASAN_OPTIONS=detect_leaks=1 /test/stream_reset_tests > /test/stream_reset_result 2>&1; then \
+      cat /test/stream_reset_result; \
+      exit 1; \
+    fi; \
+    cat /test/stream_reset_result; \
+    grep -q "PASS stream reset used the ABI stream handle" /test/stream_reset_result; \
+    cat /test/stream_reset_result >> /test/result
 
 # ---------------------------------------------------------------------------
 # Stage: envoy - the pinned upstream binary, used as the target runtime.
